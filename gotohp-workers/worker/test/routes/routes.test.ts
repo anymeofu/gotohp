@@ -130,6 +130,57 @@ describe("routes/auth", () => {
   });
 });
 
+describe("routes/creds export", () => {
+  it("rejects a request without the access token", async () => {
+    const res = await SELF.fetch(
+      "https://worker.test/api/creds/nobody@example.com/export?confirm=true",
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("rejects a request missing ?confirm=true", async () => {
+    const credential = buildGooglePhotosCredential("exportme@example.com", "tok", "androidid-exp1");
+    await SELF.fetch("https://worker.test/api/auth/add-raw", {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ credential }),
+    });
+
+    const res = await SELF.fetch("https://worker.test/api/creds/exportme@example.com/export", {
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(400);
+    const json = await res.json<{ error: string }>();
+    expect(json.error).toMatch(/confirm=true/);
+  });
+
+  it("returns 404 for an unknown email even with confirm=true", async () => {
+    const res = await SELF.fetch(
+      "https://worker.test/api/creds/unknown-nobody@example.com/export?confirm=true",
+      { headers: authHeaders() },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("round-trips: add-raw a known credential, export it, and get the same string back", async () => {
+    const credential = buildGooglePhotosCredential("roundtrip@example.com", "tok-rt", "androidid-exp2");
+    const addRes = await SELF.fetch("https://worker.test/api/auth/add-raw", {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ credential }),
+    });
+    expect(addRes.status).toBe(200);
+
+    const exportRes = await SELF.fetch(
+      "https://worker.test/api/creds/roundtrip@example.com/export?confirm=true",
+      { headers: authHeaders() },
+    );
+    expect(exportRes.status).toBe(200);
+    const json = await exportRes.json<{ credential: string }>();
+    expect(json.credential).toBe(credential);
+  });
+});
+
 describe("routes/dedup", () => {
   const originalFetch = globalThis.fetch;
   beforeEach(async () => {
