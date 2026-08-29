@@ -1,0 +1,31 @@
+services:
+  gotohp:
+    build:
+      context: .
+      dockerfile: build/docker/Dockerfile.server
+      args:
+        CGO_ENABLED: "0"
+    image: gotohp:latest
+    container_name: gotohp
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      WAILS_SERVER_HOST: "0.0.0.0"
+      # The distroless runtime user (uid 65532) has no $HOME set, and
+      # os.UserConfigDir() (backend/configmanager.go) hard-fails if neither
+      # $HOME nor $XDG_CONFIG_HOME is defined. Pin it explicitly so config
+      # (accounts, settings) resolves to the mounted volume below instead of
+      # crashing on startup.
+      XDG_CONFIG_HOME: "/data"
+    volumes:
+      # Named volume, not a bind mount: bind-mounting an empty host directory
+      # would be owned by root and unwritable by uid 65532. A named volume's
+      # mount point is created with permissions Docker/the daemon control and
+      # is generally writable by any uid; verify on first run (see below) —
+      # if the account you add doesn't survive a `docker compose restart`,
+      # the volume likely isn't writable and needs `chown 65532:65532`.
+      - gotohp-data:/data
+
+volumes:
+  gotohp-data:
