@@ -14,8 +14,22 @@
 # The Taskfile passes these through: task build:docker CGO_ENABLED=1 GO_IMAGE=... RUNTIME_IMAGE=...
 
 ARG GO_IMAGE=golang:alpine
+ARG NODE_IMAGE=node:24-alpine
 ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12
 ARG CGO_ENABLED=0
+
+# Frontend build stage.
+# main.go's `//go:embed all:frontend/dist` requires this directory to exist
+# with real build output *before* `go build` runs — frontend/dist is
+# gitignored (build artifact, not source), so a plain `docker build` on a
+# fresh clone has nothing to embed unless it's built here first. This makes
+# the image self-sufficient: no local Node/Task run needed on the host.
+FROM ${NODE_IMAGE} AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
 
 # Build stage
 FROM ${GO_IMAGE} AS builder
@@ -33,6 +47,9 @@ RUN if command -v apk >/dev/null 2>&1; then \
 
 # Copy source code
 COPY . .
+
+# Bring in the frontend build output the Go embed directive needs.
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 # Remove local replace directive if present (for production builds)
 RUN sed -i '/^replace/d' go.mod || true
