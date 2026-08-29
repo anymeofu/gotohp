@@ -5,53 +5,46 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"testing"
 )
 
-func TestCheckBasicAuth(t *testing.T) {
+func TestCheckAccessToken(t *testing.T) {
 	tests := []struct {
-		name         string
-		setAuth      bool
-		user, pass   string
-		wantUsername string
-		wantPassword string
-		want         bool
+		name       string
+		setAuth    bool
+		user, pass string
+		wantToken  string
+		want       bool
 	}{
 		{
-			name:         "correct credentials",
-			setAuth:      true,
-			user:         "admin",
-			pass:         "secret",
-			wantUsername: "admin",
-			wantPassword: "secret",
-			want:         true,
+			name:      "correct token, empty username",
+			setAuth:   true,
+			user:      "",
+			pass:      "secret",
+			wantToken: "secret",
+			want:      true,
 		},
 		{
-			name:         "wrong password",
-			setAuth:      true,
-			user:         "admin",
-			pass:         "wrong",
-			wantUsername: "admin",
-			wantPassword: "secret",
-			want:         false,
+			name:      "correct token, any username is ignored",
+			setAuth:   true,
+			user:      "whatever",
+			pass:      "secret",
+			wantToken: "secret",
+			want:      true,
 		},
 		{
-			name:         "wrong username",
-			setAuth:      true,
-			user:         "someone-else",
-			pass:         "secret",
-			wantUsername: "admin",
-			wantPassword: "secret",
-			want:         false,
+			name:      "wrong token",
+			setAuth:   true,
+			user:      "",
+			pass:      "wrong",
+			wantToken: "secret",
+			want:      false,
 		},
 		{
-			name:         "missing header",
-			setAuth:      false,
-			wantUsername: "admin",
-			wantPassword: "secret",
-			want:         false,
+			name:      "missing header",
+			setAuth:   false,
+			wantToken: "secret",
+			want:      false,
 		},
 	}
 
@@ -62,31 +55,29 @@ func TestCheckBasicAuth(t *testing.T) {
 				req.SetBasicAuth(tt.user, tt.pass)
 			}
 
-			got := checkBasicAuth(req, tt.wantUsername, tt.wantPassword)
+			got := checkAccessToken(req, tt.wantToken)
 			if got != tt.want {
-				t.Errorf("checkBasicAuth() = %v, want %v", got, tt.want)
+				t.Errorf("checkAccessToken() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
 func TestServerAuthMiddleware_Unconfigured(t *testing.T) {
-	t.Setenv(serverBasicAuthEnvUsername, "")
-	t.Setenv(serverBasicAuthEnvPassword, "")
+	t.Setenv(serverAccessTokenEnv, "")
 
 	mw := serverAuthMiddleware()
 	if mw != nil {
-		t.Fatalf("expected nil middleware when both env vars are unset, got non-nil")
+		t.Fatalf("expected nil middleware when token env var is unset, got non-nil")
 	}
 }
 
 func TestServerAuthMiddleware_ConfiguredGatesRequests(t *testing.T) {
-	t.Setenv(serverBasicAuthEnvUsername, "admin")
-	t.Setenv(serverBasicAuthEnvPassword, "secret")
+	t.Setenv(serverAccessTokenEnv, "secret")
 
 	mw := serverAuthMiddleware()
 	if mw == nil {
-		t.Fatal("expected non-nil middleware when both env vars are set")
+		t.Fatal("expected non-nil middleware when token env var is set")
 	}
 
 	handlerCalled := false
@@ -112,10 +103,10 @@ func TestServerAuthMiddleware_ConfiguredGatesRequests(t *testing.T) {
 		t.Error("next handler should not be called for unauthenticated request")
 	}
 
-	// Authenticated request -> passes through to next handler.
+	// Authenticated request (blank username, correct token as password) -> passes through.
 	handlerCalled = false
 	req = httptest.NewRequest(http.MethodGet, "/", nil)
-	req.SetBasicAuth("admin", "secret")
+	req.SetBasicAuth("", "secret")
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -124,34 +115,5 @@ func TestServerAuthMiddleware_ConfiguredGatesRequests(t *testing.T) {
 	}
 	if !handlerCalled {
 		t.Error("next handler should be called for authenticated request")
-	}
-}
-
-// TestHelperProcess_HalfConfiguredAuth is not a real test; it's invoked as a
-// subprocess by TestServerAuthMiddleware_RequiresBothVars to exercise the
-// log.Fatal path (which calls os.Exit and so cannot run in-process).
-func TestHelperProcess_HalfConfiguredAuth(t *testing.T) {
-	if os.Getenv("GOTOHP_TEST_HALF_CONFIGURED_AUTH") != "1" {
-		return
-	}
-	serverAuthMiddleware()
-}
-
-// TestServerAuthMiddleware_RequiresBothVars verifies that setting only one of
-// the two env vars fails loudly at startup (log.Fatal / non-zero exit),
-// rather than silently running unprotected or silently ignoring the
-// half-configured value.
-func TestServerAuthMiddleware_RequiresBothVars(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=TestHelperProcess_HalfConfiguredAuth")
-	cmd.Env = append(os.Environ(),
-		"GOTOHP_TEST_HALF_CONFIGURED_AUTH=1",
-		serverBasicAuthEnvUsername+"=admin",
-		serverBasicAuthEnvPassword+"=",
-	)
-	out, err := cmd.CombinedOutput()
-
-	exitErr, ok := err.(*exec.ExitError)
-	if !ok || exitErr.Success() {
-		t.Fatalf("expected process to exit non-zero via log.Fatal, err=%v, output=%s", err, out)
 	}
 }

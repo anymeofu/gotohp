@@ -21,12 +21,13 @@ services:
       # (accounts, settings) resolves to the mounted volume below instead of
       # crashing on startup.
       XDG_CONFIG_HOME: "/data"
-      # Optional HTTP Basic Auth for server mode. Uncomment and set both to
-      # protect the app (it's reachable by anyone who reaches this URL
-      # otherwise). Both must be set together, or the server refuses to
-      # start.
-      # GOTOHP_SERVER_USERNAME: "changeme"
-      # GOTOHP_SERVER_PASSWORD: "changeme"
+      # Optional access-token protection for server mode. Uncomment and set
+      # to protect the app (it's reachable by anyone who reaches this URL
+      # otherwise). Same shape as the Cloudflare Worker rewrite's
+      # APP_ACCESS_TOKEN: a single token, checked via the browser's native
+      # HTTP Basic Auth prompt (leave the username field blank, put the
+      # token in the password field).
+      # GOTOHP_ACCESS_TOKEN: "changeme"
     volumes:
       # Named volume, not a bind mount: bind-mounting an empty host directory
       # would be owned by root and unwritable by uid 65532. A named volume's
