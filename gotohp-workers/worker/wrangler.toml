@@ -19,8 +19,8 @@ not_found_handling = "single-page-application"
 # Create with: wrangler kv namespace create CREDS
 [[kv_namespaces]]
 binding = "CREDS"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
-preview_id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
+id = "4dbd0726512948968575186996aa2506"
+preview_id = "c12e75d5fa1544cc9a7cab0f3f9ed221"
 
 # Secrets (set via `wrangler secret put <NAME>`, never committed):
 #   APP_ACCESS_TOKEN  — shared secret gating all /api/* routes
