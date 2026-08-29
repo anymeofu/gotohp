@@ -331,6 +331,31 @@ func (g *ConfigManager) RemoveCredentials(email string) error {
 	return nil
 }
 
+// ExportCredential returns the raw stored auth string for the given email, so
+// it can be re-imported elsewhere (GUI advanced paste, or `creds add`).
+// Credentials are already stored in plaintext locally (see AppConfig.Credentials),
+// so no additional encryption/decryption is needed here.
+func (g *ConfigManager) ExportCredential(email string) (string, error) {
+	if email == "" {
+		return "", fmt.Errorf("email cannot be empty")
+	}
+
+	configMu.RLock()
+	defer configMu.RUnlock()
+
+	for _, cred := range AppConfig.Credentials {
+		params, err := url.ParseQuery(cred)
+		if err != nil {
+			continue // skip malformed entries
+		}
+		if params.Get("Email") == email {
+			return cred, nil
+		}
+	}
+
+	return "", fmt.Errorf("no credentials found for email %s", email)
+}
+
 func credentialNeedsTokenBinding(params url.Values) bool {
 	if params.Get("token_binding_alias") != "" {
 		return false

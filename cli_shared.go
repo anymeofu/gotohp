@@ -152,6 +152,7 @@ func printCredentialsHelp() {
 	fmt.Println("  remove, rm <email>      Remove a credential by email")
 	fmt.Println("  list, ls                List all credentials")
 	fmt.Println("  set, select <email>     Set active credential (supports partial matching)")
+	fmt.Println("  export <email>          Print the raw stored credential string for an email")
 }
 
 func handleCredentialsCommand(args []string) {
@@ -279,6 +280,20 @@ func handleCredentialsCommand(args []string) {
 
 		configManager.SetSelected(matchedEmail)
 		fmt.Printf("✓ Active credential set to %s\n", matchedEmail)
+
+	case "export":
+		if len(args) < 2 {
+			fmt.Println("Error: email required")
+			fmt.Printf("Usage: %s creds export <email>\n", cliExecutableName)
+			os.Exit(1)
+		}
+		email := args[1]
+		cred, err := configManager.ExportCredential(email)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error exporting credentials: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(cred)
 
 	default:
 		fmt.Printf("Error: unknown subcommand '%s'\n\n", subcommand)
