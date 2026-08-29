@@ -3,6 +3,17 @@ main = "src/index.ts"
 compatibility_date = "2024-11-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Serves the built web/ SPA (run `npm run build` in ../web first) directly
+# from this same Worker deployment, so gotohp is one deployable unit.
+# Requests that match a static file are served straight from the asset
+# store; anything else (including all /api/* routes) falls through to the
+# Hono app in src/index.ts. `single-page-application` fallback means any
+# unmatched non-asset path serves index.html for client-side routing.
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
 # KV namespace holding encrypted Google account credentials, the selected
 # account pointer, settings, and (optionally) cached bearer tokens.
 # Create with: wrangler kv namespace create CREDS
