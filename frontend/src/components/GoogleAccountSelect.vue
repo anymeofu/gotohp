@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { Check, Plus, X } from '@lucide/vue'
+import { Check, Copy, Plus, X } from '@lucide/vue'
 import {
   SelectItem as SelectItemPrimitive,
   SelectItemIndicator,
@@ -19,11 +19,13 @@ interface Props {
   modelValue?: string
   options?: string[]
   removingAccount?: string
+  exportingAccount?: string
 }
 
 interface Emits {
   (event: 'update:modelValue', value: string): void
   (event: 'item-removed', value: string): void
+  (event: 'item-exported', value: string): void
   (event: 'add'): void
 }
 
@@ -31,6 +33,7 @@ const props = withDefaults(defineProps<Props>(), {
   modelValue: '',
   options: () => [],
   removingAccount: '',
+  exportingAccount: '',
 })
 
 const emit = defineEmits<Emits>()
@@ -69,7 +72,7 @@ watch(selectedValue, (newValue) => {
         >
           <SelectItemPrimitive
             :value="option"
-            class="focus:bg-accent focus:text-accent-foreground relative flex min-w-0 w-full cursor-default items-center rounded-sm py-1.5 pr-9 pl-8 text-sm outline-hidden select-none"
+            class="focus:bg-accent focus:text-accent-foreground relative flex min-w-0 w-full cursor-default items-center rounded-sm py-1.5 pr-16 pl-8 text-sm outline-hidden select-none"
           >
             <span class="absolute left-2 flex size-3.5 items-center justify-center">
               <SelectItemIndicator>
@@ -80,6 +83,17 @@ watch(selectedValue, (newValue) => {
               <span class="block max-w-44 truncate">{{ option }}</span>
             </SelectItemText>
           </SelectItemPrimitive>
+          <button
+            type="button"
+            class="absolute right-8 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+            :aria-label="`Copy credential for ${option}`"
+            title="Copy raw credential to clipboard — grants full access to this account, keep it secret"
+            :disabled="exportingAccount === option"
+            @pointerdown.stop.prevent
+            @click.stop.prevent="emit('item-exported', option)"
+          >
+            <Copy class="size-3.5" />
+          </button>
           <button
             type="button"
             class="absolute right-1.5 top-1/2 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-destructive hover:text-white disabled:pointer-events-none disabled:opacity-50"

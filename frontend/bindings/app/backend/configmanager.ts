@@ -25,6 +25,10 @@ export function CredentialNeedsTokenBinding(authString: string): $CancellablePro
     return $Call.ByID(920629710, authString);
 }
 
+export function ExportCredential(email: string): $CancellablePromise<string> {
+    return $Call.ByID(1227316685, email);
+}
+
 export function GetAccounts(): $CancellablePromise<$models.AccountsState> {
     return $Call.ByID(562122970).then(($result: any) => {
         return $$createType0($result);

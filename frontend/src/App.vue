@@ -11,7 +11,7 @@ import { useColorMode } from '@vueuse/core'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { UserPlus } from '@lucide/vue'
 import { ConfigManager } from '../bindings/app/backend'
-import { Events } from '@wailsio/runtime'
+import { Clipboard, Events } from '@wailsio/runtime'
 import Button from "./components/ui/button/Button.vue"
 import GoogleAccountSelect from './components/GoogleAccountSelect.vue'
 import GoogleAuthSetup from "./components/GoogleAuthSetup.vue"
@@ -44,6 +44,7 @@ const tokenBindingEmail = ref('')
 const isExtractingTokenBinding = ref(false)
 const isAccountSetupOpen = ref(false)
 const removingAccount = ref('')
+const exportingAccount = ref('')
 
 watch(selectedOption, async (newValue) => {
   if (newValue) {
@@ -126,6 +127,34 @@ async function removeCredentials(email: string) {
     return false
   } finally {
     removingAccount.value = ''
+  }
+}
+
+async function copyToClipboard(text: string) {
+  try {
+    // Desktop mode: the Wails-native clipboard binding.
+    await Clipboard.SetText(text)
+  } catch {
+    // Server mode: same class of issue as Browser.OpenURL above — the
+    // Wails-native call has nothing to talk to in a headless server, so
+    // fall back to the browser's own Clipboard API.
+    await navigator.clipboard.writeText(text)
+  }
+}
+
+async function exportCredential(email: string) {
+  exportingAccount.value = email
+  try {
+    const credential = await ConfigManager.ExportCredential(email)
+    await copyToClipboard(credential)
+    toast.success('Credential copied to clipboard.', {
+      description: 'This is a sensitive master credential — keep it secret.',
+    })
+  } catch (error) {
+    console.error('Failed to export credentials:', error)
+    toast.error('Failed to copy credential.')
+  } finally {
+    exportingAccount.value = ''
   }
 }
 
@@ -423,7 +452,9 @@ onUnmounted(() => {
             v-model="selectedOption"
             :options="options"
             :removing-account="removingAccount"
+            :exporting-account="exportingAccount"
             @item-removed="removeCredentials"
+            @item-exported="exportCredential"
             @add="openAccountSetup"
           />
           <div
