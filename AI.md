@@ -60,6 +60,14 @@ the static frontend from the same origin.
   `{credential, addedAt}`, key material from the `CRED_ENC_KEY` Worker
   secret. `selected` and `settings` stored plaintext (no secrets in them).
   Optional bearer-token cache in `token:<email>` with native KV TTL.
+- **File-picker upload button**: added alongside drag-and-drop since mobile
+  browsers can't drag-drop at all (no drag source). First version had a real
+  bug — captured `input.files` as a live reference, then reset
+  `input.value = ''` *before* checking its length, which empties that same
+  live reference immediately, so every attempt silently no-opped with zero
+  console errors. Fixed by snapshotting via `Array.from(input.files)` first.
+  Verified live: full pipeline (settings → dedup → init → stream → commit)
+  runs and the UI correctly reports success/failure.
 - **Protobuf**: generated as static TS modules from the repo's existing
   `.proto/` sources via `protobufjs-cli` (`pbjs`/`pbts`), checked in at
   `gotohp-workers/worker/src/proto/gen/`.
@@ -213,7 +221,110 @@ page, confirm it's still there.
 is still unpatched as of this doc — worth fixing so future save failures,
 whatever the cause, actually surface to the user instead of failing silent.)*
 
-### 2.6 Distroless config-path crash risk
+### 2.7 Drag-and-drop / upload didn't work at all in server mode
+
+**Problem hit**: dropping a file (or using any trigger) did nothing —
+no error, no log line, nothing. Confirmed by reading the actual code, not
+guessed: drag-and-drop upload was built entirely around **native desktop
+window events** (`main.go`'s `window.OnWindowEvent(events.Common.
+WindowFilesDropped, ...)`, backed by `event.Context().DroppedFiles()`),
+which only fire inside a real Wails webview running locally and hand back
+real local filesystem paths. `backend/upload.go`'s `Upload(app, paths
+[]string)` then just calls `os.Open()` on those paths directly. This is
+correct in desktop mode (app and files are the same machine) and
+fundamentally broken in server mode (files live on the visitor's remote
+browser's machine, the app runs on the VPS — there's no shared filesystem,
+and the frontend's own `onDrop()` handler did nothing with the browser's
+actual `dataTransfer` data at all).
+
+**Fix**: real browser-based upload for server mode, additive and fully
+gated so desktop mode is completely unaffected:
+- `POST /gotohp/api/upload` (`multipart/form-data`, repeatable `file`
+  field) streams each part straight to a temp file (never buffers a whole
+  file in memory) under a dedicated `gotohp-server-uploads` subdirectory,
+  then hands the resulting path(s) to the **existing, unmodified**
+  `UploadManager.Upload(app, paths)` — 100% of the dedup/protobuf/commit/
+  album/Live-Photo logic is reused, only the *trigger* mechanism changed.
+- `GET /gotohp/api/mode` lets the frontend detect server vs desktop at
+  runtime (both ship the exact same `frontend/dist` bundle) — server mode
+  registers this route, desktop mode never does, so a failed/404 probe
+  means "desktop."
+- `App.vue`'s `onDrop`/`onZoneDrop`/`onDragOver` now actually read
+  `dataTransfer.files` and, in server mode only, POST them via XHR
+  (`upload.onprogress` for real progress, `fetch` doesn't expose that).
+  Desktop mode keeps using the native `files-dropped` event, untouched.
+- A plain `<input type="file" multiple>` fallback exists too (shown only in
+  server mode) — more reliable across browsers/devices than drag-drop, and
+  the one to reach for if drag-drop itself ever misbehaves again.
+- Both new routes sit behind the same access-token gate as everything else
+  (verified with `curl`: `401` without the token on both).
+
+**Temp file lifecycle** (the disk-space question — see §7's bandwidth/disk
+Q&A too): each upload's staging directory is removed as soon as
+`UploadManager` finishes with it, success or failure. A periodic sweeper
+(`StartUploadStagingSweeper`, server mode only) also runs at startup and
+every 48h, removing anything under the dedicated staging subdirectory older
+than 6h, as a safety net for crashes or a killed process — it never touches
+anything outside that one subdirectory. There's also a manual "Clean up
+leftover upload files" button in Settings (server mode only) that runs the
+same sweep on demand and reports how much was freed.
+
+**Disk usage implication, unlike the Worker**: the Worker streams bytes
+straight through with nothing ever touching disk. This VPS mechanism
+briefly writes each file to local disk first — so the real constraint isn't
+"total VPS disk," it's `UploadThreads × (size of files uploading
+concurrently) at any single moment`. For realistic photo/video sizes this
+is a non-issue. **Bandwidth is also counted twice** here (browser→VPS, then
+VPS→Google) versus the Worker's single pass-through — again a non-issue
+unless your VPS's bandwidth allowance is unusually tight relative to actual
+usage.
+
+### 2.8 Uploads "worked" server-side but the browser showed nothing
+
+**Problem hit**: after §2.7's fix landed, files were reaching Google (
+confirmed independently via the Worker's `/api/dedup` — a real `mediaKey`
+came back) but the browser UI never showed progress or a completion state,
+looking exactly like the upload had silently failed or hung — including
+during drag-and-drop specifically, which looked "stuck."
+
+**Root cause**: Wails v3's server mode relays `Event.Emit(...)` calls to
+the browser over a genuine **WebSocket** connection (`GET /wails/events`,
+confirmed in the Wails v3 source, `websocket_server.go`). The nginx config
+written earlier (§2.2) had no WebSocket-upgrade support at all — no
+`Upgrade`/`Connection` headers — so that connection failed silently. The
+underlying upload pipeline ran (and completed, or failed) correctly the
+entire time; the browser just never heard about it either way, which is
+why this could look identical to "stuck" regardless of whether the actual
+upload succeeded or failed server-side.
+
+**Fix** (standard nginx WebSocket-proxying pattern — needs a `map`
+directive at the `http` level, e.g. `/etc/nginx/conf.d/websocket-upgrade.
+conf`, plus two `proxy_set_header` lines in the `server` block):
+```nginx
+# /etc/nginx/conf.d/websocket-upgrade.conf
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+```
+```nginx
+# inside the existing proxy_pass location block
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection $connection_upgrade;
+```
+`nginx -t && systemctl reload nginx` after. Verified for real afterward —
+both a raw WebSocket handshake test (`curl --http1.1` with the upgrade
+headers returns `101 Switching Protocols`) and a real upload through the
+actual UI, which correctly showed "Upload Results: Successful: 1" and,
+separately, a specific failure toast for a deliberately-bad test file —
+confirming both success *and* error events now reach the browser.
+
+If you're running your own reverse proxy in front of a different domain,
+check for this same gap — any proxy in the chain (nginx, a load balancer,
+Cloudflare's own proxy settings) needs to pass WebSocket upgrades through,
+not just plain HTTP.
+
+### 2.9 Distroless config-path crash risk
 
 Separate from §2.5: `os.UserConfigDir()` (which `determineConfigPath()`
 relies on) hard-fails via `log.Fatal` if neither `$HOME` nor
