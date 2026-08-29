@@ -4,7 +4,11 @@
     "lib": ["ES2022"],
     "module": "ES2022",
     "moduleResolution": "Bundler",
-    "types": ["@cloudflare/workers-types", "vitest/globals"],
+    "types": [
+      "@cloudflare/workers-types",
+      "vitest/globals",
+      "./node_modules/@cloudflare/vitest-pool-workers/types/cloudflare-test.d.ts"
+    ],
     "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
