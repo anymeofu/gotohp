@@ -37,11 +37,21 @@ watch(isOpen, (open) => {
 
 async function openEmbeddedSetup() {
   try {
+    // Desktop mode: this opens the OS's real default browser (not the
+    // embedded Wails webview) — required because Google's sign-in blocks
+    // "disallowed_useragent" embedded webviews outright.
     await Browser.OpenURL(embeddedSetupURL)
-  } catch (error) {
-    toast.error('Could not open the system browser', {
-      description: error instanceof Error ? error.message : String(error),
-    })
+  } catch {
+    // Server mode: there's no OS browser to shell out to (the Wails
+    // backend tries to exec `xdg-open`, which doesn't exist in a headless
+    // container) — but the user is already sitting in a real browser tab
+    // here, so just open a new tab client-side instead.
+    const opened = window.open(embeddedSetupURL, '_blank', 'noopener,noreferrer')
+    if (!opened) {
+      toast.error('Could not open the sign-in page', {
+        description: 'Your browser blocked the popup — allow popups for this site, or open the URL manually: ' + embeddedSetupURL,
+      })
+    }
   }
 }
 
