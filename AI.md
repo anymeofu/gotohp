@@ -186,18 +186,28 @@ container starts from zero with no error ever surfacing to the user.
 mount point owned by `root:root`. The container runs as the distroless
 image's non-root UID `65532`, which has no write permission there.
 
-**Fix** (the distroless image has no shell, so `chown` from inside the
-container isn't possible — do it from outside via a throwaway container
-sharing the same volume):
+**Fixed automatically now** — `docker-compose.yml` has an `init-permissions`
+service (a throwaway `alpine` container, since the distroless app image has
+no shell to `chown` from inside itself) that runs `chown -R 65532:65532
+/data` on the shared volume before the app starts, every single `docker
+compose up`. It's a `depends_on: condition: service_completed_successfully`
+step, so the app container always waits for it to finish first. Chowning
+already-correct ownership is a fast no-op, so this runs every time
+harmlessly rather than being a first-run-only manual step — you never need
+to think about this again, just `docker compose up -d --build` as normal.
 
+If you're on an older checkout that predates this fix, the manual one-time
+version was:
 ```bash
 docker run --rm -v gotohp-data:/data alpine chown -R 65532:65532 /data
 docker compose up -d --build
 ```
+`git pull` to get the automatic version instead.
 
-Then **re-add any account added before this fix** — it was never actually
-saved. Verify persistence really works now: add an account,
-`docker compose restart`, reload the page, confirm it's still there.
+If you hit this *before* the automatic fix was in place: **re-add any
+account added at that time** — it was never actually saved. Verify
+persistence works now: add an account, `docker compose restart`, reload the
+page, confirm it's still there.
 
 *(The underlying silently-swallowed-error bug in `configmanager.go` itself
 is still unpatched as of this doc — worth fixing so future save failures,
@@ -350,8 +360,11 @@ you're on an old build — `git pull && docker compose up -d --build`.
 
 ### 6.5 Added an account, it's gone after redeploy
 
-See §2.5 — run the volume `chown` fix, then re-add the account, then verify
-with `docker compose restart` (not full rebuild) that it survives.
+See §2.5 — this is now fixed automatically by `docker-compose.yml`'s
+`init-permissions` step, no manual action needed on current checkouts. If
+you're still seeing this, `git pull` to get the fix, then re-add the
+account once and verify with `docker compose restart` (not a full rebuild)
+that it survives from now on.
 
 ### 6.6 Container crashes on startup with no useful log
 
