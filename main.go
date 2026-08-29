@@ -42,7 +42,8 @@ func runGUI() {
 			application.NewService(&backend.ConfigManager{}),
 		},
 		Assets: application.AssetOptions{
-			Handler: application.BundledAssetFileServer(assets),
+			Handler:    application.BundledAssetFileServer(assets),
+			Middleware: application.Middleware(serverAuthMiddleware()),
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
