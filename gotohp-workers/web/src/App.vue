@@ -177,6 +177,26 @@ const onDragLeave = (e: DragEvent) => {
   }, 50)
 }
 
+// Plain <input type="file"> fallback -- drag-and-drop doesn't exist at all
+// on mobile browsers (no drag source), and is generally less discoverable
+// than a real button even on desktop. Always uploads as a regular
+// (non-album) batch, matching the drop zone of the same name -- album/
+// auto-album uploads still go through the drop zones specifically, same
+// design choice as the VPS app's equivalent fallback.
+const onFileInputChange = async (e: Event) => {
+  const input = e.target as HTMLInputElement
+  // Snapshot into a real array BEFORE resetting .value -- input.files is a
+  // live FileList tied to the input's current value, so resetting .value
+  // first empties it out from under a still-held reference, silently
+  // turning every upload attempt into a no-op.
+  const files = input.files ? Array.from(input.files) : []
+  input.value = '' // allow re-selecting the same file(s) later
+  if (files.length === 0) return
+  const items: UploadItem[] = files.map((file) => ({ file }))
+  await settingsApi.patch({ albumName: '', albumAutoMode: false })
+  await uploadManager.startUpload(items, {})
+}
+
 async function handleDropZone(e: DragEvent, dropZone: 'regular' | 'album' | 'auto-album') {
   e.preventDefault()
   if (dragLeaveTimeout) {
@@ -387,6 +407,21 @@ onUnmounted(() => {
           <h1 class="text-xl font-semibold select-none">
             Drop files to upload
           </h1>
+          <input
+            id="file-picker-input"
+            type="file"
+            multiple
+            class="hidden"
+            @change="onFileInputChange"
+          >
+          <Button
+            variant="outline"
+            class="cursor-pointer select-none"
+            as="label"
+            for="file-picker-input"
+          >
+            Choose files to upload
+          </Button>
           <GoogleAccountSelect
             v-model="selectedOption"
             :options="options"
