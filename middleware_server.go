@@ -6,7 +6,47 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"os"
+
+	"app/backend"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+// appRouteBinder lets main.go finish wiring the browser-upload route (see
+// server_upload.go) once the AppInterface/UploadManager it needs exist,
+// after application.New() has already consumed the middleware built by
+// newAssetMiddleware.
+type appRouteBinder struct {
+	route *serverUploadRoute
+}
+
+func (b appRouteBinder) Attach(app backend.AppInterface, uploadManager *backend.UploadManager) {
+	b.route.attach(app, uploadManager)
+}
+
+// newAssetMiddleware builds the full server-mode AssetServer middleware
+// chain: the access-token gate (if configured) wrapping the browser-upload
+// route (if not, the upload route is still installed -- it's the trigger
+// mechanism for uploads in server mode, not an optional extra). Both stay
+// inside the same chain Wails threads through AssetOptions.Middleware, so
+// both the static frontend and this new route are gated identically.
+func newAssetMiddleware() (application.Middleware, appRouteBinder) {
+	// Safety-net background sweep for leftover browser-upload staging
+	// files (crash, killed process, etc.) -- see
+	// backend/upload_staging_server.go. Started here since this is
+	// server mode's earliest init point, reached before application.New().
+	backend.StartUploadStagingSweeper()
+
+	route := newServerUploadRoute()
+
+	var mws []application.Middleware
+	if authMW := serverAuthMiddleware(); authMW != nil {
+		mws = append(mws, authMW)
+	}
+	mws = append(mws, route.middleware())
+
+	return application.ChainMiddleware(mws...), appRouteBinder{route: route}
+}
 
 // serverAccessTokenEnv is the env var used to opt in to access-token
 // protection in server mode. Server mode (built with -tags server) is

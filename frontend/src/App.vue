@@ -8,7 +8,7 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet'
 import { useColorMode } from '@vueuse/core'
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { UserPlus } from '@lucide/vue'
 import { ConfigManager } from '../bindings/app/backend'
 import { Clipboard, Events } from '@wailsio/runtime'
@@ -20,6 +20,8 @@ import SettingsPanel from "./SettingsPanel.vue"
 import Upload from './Upload.vue'
 import { uploadManager } from './utils/UploadManager'
 import Toaster from './components/ui/sonner/Sonner.vue'
+import { isServerMode } from './utils/serverMode'
+import { uploadFilesToServer, type BrowserUploadProgress } from './utils/browserUpload'
 
 import { toast } from "vue-sonner"
 
@@ -35,6 +37,24 @@ const isDraggingFiles = ref(false)
 const showAlbumInput = ref(false)
 const pendingFiles = ref<string[]>([])
 const pendingFileCount = ref(0)
+
+// Server mode: browser-based upload (drag/drop + file-picker fallback).
+// Desktop mode never sets this true, and keeps using the native
+// files-dropped event exactly as before -- see AI.md and server_upload.go
+// for why desktop mode can't reuse this path (no filesystem access to
+// browser-dropped File objects).
+const serverMode = ref(false)
+// When the album drop zone is used in server mode, files are real browser
+// File objects (not native paths) waiting on the album-name prompt.
+const pendingBrowserFiles = ref<File[]>([])
+const isBrowserAlbumPending = ref(false)
+// Progress of the browser -> VPS leg of a server-mode upload (this
+// request's body finishing upload). Once the backend acknowledges receipt
+// and kicks off UploadManager.Upload, the existing Wails-event-driven
+// uploadState (Upload.vue) takes over.
+const isSendingToServer = ref(false)
+const sendToServerProgress = ref<BrowserUploadProgress | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
 
 const selectedOption = ref('')
 const options = ref<string[]>([])
@@ -164,7 +184,7 @@ function openAccountSetup() {
 
 onMounted(async () => {
   await refreshCredentials()
-
+  serverMode.value = await isServerMode()
 })
 
 const handleCopyClick = () => {
@@ -215,13 +235,22 @@ const onDragLeave = (e: DragEvent) => {
   }, 50)
 }
 
-const onDrop = () => {
+const onDrop = (e: DragEvent) => {
+  // Prevent the browser's default action for a dropped file (typically
+  // navigating away to open it) for any drop that lands outside one of the
+  // specific drop-zone elements below (e.g. desktop mode, where those zone
+  // handlers intentionally no-op and let the native files-dropped event
+  // take over instead).
+  if (e.dataTransfer?.types.includes('Files')) {
+    e.preventDefault()
+  }
+
   // Clear any pending timeout
   if (dragLeaveTimeout) {
     clearTimeout(dragLeaveTimeout)
     dragLeaveTimeout = null
   }
-  
+
   // Delay resetting isDraggingFiles to allow Wails to process the drop target
   // before Vue re-renders and hides the drop zones
   setTimeout(() => {
@@ -229,11 +258,91 @@ const onDrop = () => {
   }, 100)
 }
 
+// Server mode only: real browser drag-and-drop, routed per drop zone.
+// Desktop mode leaves this a no-op and relies entirely on the native
+// files-dropped event (see onMounted's Events.On('files-dropped', ...)
+// below) -- serverMode.value is never true there.
+const onZoneDrop = (e: DragEvent, dropZone: 'regular' | 'album' | 'auto-album') => {
+  if (!serverMode.value) return
+  const files = e.dataTransfer?.files
+  if (!files || files.length === 0) return
+  e.preventDefault()
+  e.stopPropagation()
+  void handleServerFiles(Array.from(files), dropZone)
+}
+
+async function handleServerFiles(files: File[], dropZone: 'regular' | 'album' | 'auto-album') {
+  if (files.length === 0) return
+
+  if (dropZone === 'album') {
+    pendingBrowserFiles.value = files
+    pendingFileCount.value = files.length
+    isBrowserAlbumPending.value = true
+    showAlbumInput.value = true
+    return
+  }
+
+  await ConfigManager.SetAlbumName('')
+  await ConfigManager.SetAlbumAutoMode(dropZone === 'auto-album')
+  await sendFilesToServer(files)
+}
+
+async function sendFilesToServer(files: File[]) {
+  isSendingToServer.value = true
+  sendToServerProgress.value = { loaded: 0, total: 0 }
+  try {
+    await uploadFilesToServer(files, (progress) => {
+      sendToServerProgress.value = progress
+    })
+  } catch (error) {
+    console.error('Failed to upload files to server:', error)
+    toast.error('Failed to upload files', {
+      description: error instanceof Error ? error.message : String(error),
+    })
+  } finally {
+    isSendingToServer.value = false
+    sendToServerProgress.value = null
+  }
+}
+
+// Plain <input type="file"> fallback -- more reliable than drag/drop across
+// browsers and devices (e.g. mobile, which mostly can't drag-drop at all).
+// Server mode only; always uploads as a regular (non-album) batch, matching
+// the drop zone of the same name.
+const onFileInputChange = async (e: Event) => {
+  const input = e.target as HTMLInputElement
+  const files = input.files ? Array.from(input.files) : []
+  input.value = '' // allow re-selecting the same file(s) later
+  if (files.length === 0) return
+  await handleServerFiles(files, 'regular')
+}
+
+const sendToServerPercent = computed(() => {
+  const progress = sendToServerProgress.value
+  if (!progress || progress.total === 0) return null
+  return Math.round((progress.loaded / progress.total) * 100)
+})
+
 // Album upload confirmation
 const confirmAlbumUpload = async () => {
   // Set album name in backend (not persisted to disk)
   await ConfigManager.SetAlbumName(albumNameOrKey.value)
   await ConfigManager.SetAlbumAutoMode(false)
+
+  if (isBrowserAlbumPending.value) {
+    // Server mode: pending items are real browser File objects, not native
+    // paths -- send them to the browser-upload endpoint instead of the
+    // native startUpload event.
+    const files = pendingBrowserFiles.value
+    pendingBrowserFiles.value = []
+    isBrowserAlbumPending.value = false
+    showAlbumInput.value = false
+    pendingFileCount.value = 0
+    albumNameOrKey.value = ''
+    await sendFilesToServer(files)
+    return
+  }
+
   // Start upload with pending files
   Events.Emit('startUpload', { files: pendingFiles.value })
   showAlbumInput.value = false
@@ -246,6 +355,8 @@ const cancelAlbumUpload = () => {
   showAlbumInput.value = false
   pendingFiles.value = []
   pendingFileCount.value = 0
+  pendingBrowserFiles.value = []
+  isBrowserAlbumPending.value = false
   albumNameOrKey.value = '' // Reset on cancel too
 }
 
@@ -335,6 +446,8 @@ onUnmounted(() => {
         data-file-drop-target
         data-drop-zone="regular"
         class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-muted-foreground/50 rounded-xl transition-all duration-200 drop-zone"
+        @dragover.prevent
+        @drop="onZoneDrop($event, 'regular')"
       >
         <h2 class="text-xl font-semibold select-none text-muted-foreground">
           Upload Only
@@ -347,6 +460,8 @@ onUnmounted(() => {
         data-file-drop-target
         data-drop-zone="album"
         class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-muted-foreground/50 rounded-xl transition-all duration-200 drop-zone"
+        @dragover.prevent
+        @drop="onZoneDrop($event, 'album')"
       >
         <h2 class="text-xl font-semibold select-none text-muted-foreground">
           Upload to Album
@@ -359,6 +474,8 @@ onUnmounted(() => {
         data-file-drop-target
         data-drop-zone="auto-album"
         class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-muted-foreground/50 rounded-xl transition-all duration-200 drop-zone"
+        @dragover.prevent
+        @drop="onZoneDrop($event, 'auto-album')"
       >
         <h2 class="text-xl font-semibold select-none text-muted-foreground">
           Auto Album
@@ -457,6 +574,33 @@ onUnmounted(() => {
             @item-exported="exportCredential"
             @add="openAccountSetup"
           />
+
+          <!-- Server mode: plain file picker fallback, more reliable than
+               drag/drop across browsers and devices (e.g. mobile). -->
+          <template v-if="serverMode">
+            <input
+              ref="fileInput"
+              type="file"
+              multiple
+              class="hidden"
+              @change="onFileInputChange"
+            >
+            <Button
+              variant="outline"
+              class="cursor-pointer select-none"
+              :disabled="isSendingToServer"
+              @click="fileInput?.click()"
+            >
+              {{ isSendingToServer ? 'Sending...' : 'Choose files to upload' }}
+            </Button>
+            <p
+              v-if="isSendingToServer"
+              class="text-sm text-muted-foreground select-none"
+            >
+              Sending to server{{ sendToServerPercent !== null ? ` — ${sendToServerPercent}%` : '...' }}
+            </p>
+          </template>
+
           <div
             v-if="tokenBindingEmail"
             class="w-full max-w-xs border rounded-lg p-3 flex flex-col gap-3"

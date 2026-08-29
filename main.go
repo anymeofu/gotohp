@@ -35,6 +35,8 @@ func main() {
 func runGUI() {
 	normalizeFrontendDevServerURL()
 
+	assetMiddleware, routeBinder := newAssetMiddleware()
+
 	wailsApp := application.New(application.Options{
 		Name:        "com.xob0t.gotohp",
 		Description: "Google Photos unofficial client",
@@ -43,7 +45,7 @@ func runGUI() {
 		},
 		Assets: application.AssetOptions{
 			Handler:    application.BundledAssetFileServer(assets),
-			Middleware: application.Middleware(serverAuthMiddleware()),
+			Middleware: assetMiddleware,
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
@@ -70,6 +72,11 @@ func runGUI() {
 	// Wrap Wails app in AppInterface
 	app := backend.NewWailsApp(wailsApp)
 	uploadManager := backend.NewUploadManager(app)
+
+	// Finish wiring the server-mode browser-upload route now that app/
+	// uploadManager exist (see middleware_server.go/appRouteBinder for why
+	// this can't happen earlier). No-op in desktop builds.
+	routeBinder.Attach(app, uploadManager)
 
 	// Listen for upload cancel event
 	wailsApp.Event.On("uploadCancel", func(e *application.CustomEvent) {
