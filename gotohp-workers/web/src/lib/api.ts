@@ -97,6 +97,15 @@ export const credsApi = {
       method: "DELETE",
     });
   },
+  /** Returns the raw, decrypted credential string for `email` — the same
+   * format `authApi.addRaw` accepts, for pasting into the sibling Go/VPS
+   * app's own import flow. Requires the explicit `?confirm=true` the
+   * backend route mandates as a second layer of intent-confirmation. */
+  export(email: string): Promise<{ credential: string }> {
+    return apiFetch<{ credential: string }>(
+      `/api/creds/${encodeURIComponent(email)}/export?confirm=true`,
+    );
+  },
 };
 
 export const authApi = {

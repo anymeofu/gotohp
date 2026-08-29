@@ -43,6 +43,7 @@ const albumNameOrKey = ref('')
 const tokenBindingEmail = ref('')
 const isAccountSetupOpen = ref(false)
 const removingAccount = ref('')
+const exportingAccount = ref('')
 
 watch(selectedOption, async (newValue) => {
   if (newValue) {
@@ -105,6 +106,24 @@ async function removeCredentials(email: string) {
     return false
   } finally {
     removingAccount.value = ''
+  }
+}
+
+async function exportCredential(email: string) {
+  exportingAccount.value = email
+  try {
+    const { credential } = await credsApi.export(email)
+    await navigator.clipboard.writeText(credential)
+    toast.success('Credential copied to clipboard.', {
+      description: 'Sensitive: this is a master credential for the Google account. Paste it only into the app you trust.',
+    })
+  } catch (error) {
+    console.error('Failed to export credential:', error)
+    toast.error('Failed to export credential.', {
+      description: error instanceof Error ? error.message : String(error),
+    })
+  } finally {
+    exportingAccount.value = ''
   }
 }
 
@@ -372,7 +391,9 @@ onUnmounted(() => {
             v-model="selectedOption"
             :options="options"
             :removing-account="removingAccount"
+            :exporting-account="exportingAccount"
             @item-removed="removeCredentials"
+            @item-exported="exportCredential"
             @add="openAccountSetup"
           />
           <div
