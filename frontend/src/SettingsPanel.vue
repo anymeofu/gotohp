@@ -4,12 +4,15 @@ import { ConfigManager } from '../bindings/app/backend'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import Button from './components/ui/button/Button.vue'
 import {
     Tooltip,
     TooltipContent,
     TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Info } from '@lucide/vue'
+import { toast } from 'vue-sonner'
+import { isServerMode } from './utils/serverMode'
 
 import {
     NumberField,
@@ -57,7 +60,45 @@ const toggleSetting = (setting: BooleanSetting, enabled = true) => {
     settings.value[setting] = !settings.value[setting]
 }
 
+// Server mode only: manual trigger for the same leftover-upload-staging
+// cleanup the background sweep already runs automatically every couple of
+// days (see backend/upload_staging_server.go). Desktop builds never create
+// these files, so the button is hidden there entirely.
+const serverMode = ref(false)
+const isCleaningUpUploads = ref(false)
+
+function formatBytes(bytes: number): string {
+    if (bytes <= 0) return '0 B'
+    const units = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(1024))
+    return `${parseFloat((bytes / Math.pow(1024, i)).toFixed(1))} ${units[i]}`
+}
+
+const cleanupServerUploads = async () => {
+    isCleaningUpUploads.value = true
+    try {
+        const result = await ConfigManager.CleanupServerUploads()
+        if (result.removedDirs > 0) {
+            toast.success('Cleaned up leftover upload files', {
+                description: `Removed ${result.removedDirs} file(s), freed ${formatBytes(result.removedBytes)}.`,
+            })
+        } else {
+            toast.info('Nothing to clean up', {
+                description: 'No leftover upload files were found.',
+            })
+        }
+    } catch (error) {
+        console.error('Failed to clean up leftover upload files:', error)
+        toast.error('Failed to clean up leftover upload files', {
+            description: error instanceof Error ? error.message : String(error),
+        })
+    } finally {
+        isCleaningUpUploads.value = false
+    }
+}
+
 onMounted(async () => {
+    serverMode.value = await isServerMode()
     try {
         const config = await ConfigManager.GetSettings()
         settings.value = {
@@ -364,6 +405,20 @@ watch(() => settings.value.uploadThreads, async (newValue) => {
         type="text"
         placeholder="Proxy URL (optional)"
       />
+    </div>
+    <div
+      v-if="serverMode"
+      class="flex items-center justify-between pt-1"
+    >
+      <Label class="size-full">Leftover Upload Files</Label>
+      <Button
+        variant="outline"
+        class="cursor-pointer select-none shrink-0"
+        :disabled="isCleaningUpUploads"
+        @click="cleanupServerUploads"
+      >
+        {{ isCleaningUpUploads ? 'Cleaning up...' : 'Clean up' }}
+      </Button>
     </div>
   </div>
 </template>

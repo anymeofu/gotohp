@@ -449,6 +449,31 @@ export class UploadBatchStart {
     }
 }
 
+export class UploadCleanupResult {
+    "removedDirs": number;
+    "removedBytes": number;
+
+    /** Creates a new UploadCleanupResult instance. */
+    constructor($$source: Partial<UploadCleanupResult> = {}) {
+        if (!("removedDirs" in $$source)) {
+            this["removedDirs"] = 0;
+        }
+        if (!("removedBytes" in $$source)) {
+            this["removedBytes"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new UploadCleanupResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): UploadCleanupResult {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new UploadCleanupResult($$parsedSource as Partial<UploadCleanupResult>);
+    }
+}
+
 // Private type creation functions
 const $$createType0 = AccountSummary.createFrom;
 const $$createType1 = $Create.Array($$createType0);

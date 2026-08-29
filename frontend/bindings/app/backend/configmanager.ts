@@ -21,6 +21,12 @@ export function AddTokenBindingAliasFromADB(email: string): $CancellablePromise<
     return $Call.ByID(3252041498, email);
 }
 
+export function CleanupServerUploads(): $CancellablePromise<$models.UploadCleanupResult> {
+    return $Call.ByID(3913018321).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
 export function CredentialNeedsTokenBinding(authString: string): $CancellablePromise<boolean> {
     return $Call.ByID(920629710, authString);
 }
@@ -124,3 +130,4 @@ export function SetUseQuota(useQuota: boolean): $CancellablePromise<void> {
 // Private type creation functions
 const $$createType0 = $models.AccountsState.createFrom;
 const $$createType1 = $models.Config.createFrom;
+const $$createType2 = $models.UploadCleanupResult.createFrom;
