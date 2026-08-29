@@ -1,0 +1,16 @@
+name = "gotohp-worker"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# KV namespace holding encrypted Google account credentials, the selected
+# account pointer, settings, and (optionally) cached bearer tokens.
+# Create with: wrangler kv namespace create CREDS
+[[kv_namespaces]]
+binding = "CREDS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+preview_id = "REPLACE_WITH_PREVIEW_KV_NAMESPACE_ID"
+
+# Secrets (set via `wrangler secret put <NAME>`, never committed):
+#   APP_ACCESS_TOKEN  — shared secret gating all /api/* routes
+#   CRED_ENC_KEY      — base64 32-byte AES-256-GCM key material for KV credential encryption
