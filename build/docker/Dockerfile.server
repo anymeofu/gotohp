@@ -80,6 +80,16 @@ EXPOSE 8080
 # Can be overridden at runtime with -e WAILS_SERVER_HOST=...
 ENV WAILS_SERVER_HOST=0.0.0.0
 
+# Optional HTTP Basic Auth. Server mode has NO authentication by default --
+# anyone who reaches the URL can add/remove Google accounts and upload. If
+# you're exposing this publicly (e.g. behind nginx+SSL on a VPS), set BOTH of
+# the following at runtime to gate the whole app behind HTTP Basic Auth
+# (e.g. `docker run -e GOTOHP_SERVER_USERNAME=... -e GOTOHP_SERVER_PASSWORD=...`,
+# or see docker-compose.yml). Both must be set together, or the server
+# refuses to start; leaving both unset disables auth (backward compatible).
+# ENV GOTOHP_SERVER_USERNAME=changeme
+# ENV GOTOHP_SERVER_PASSWORD=changeme
+
 # Run as the distroless non-root user.
 USER 65532:65532
 
