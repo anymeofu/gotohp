@@ -1,4 +1,23 @@
 services:
+  # One-shot init: fixes ownership of the named volume's mount point before
+  # the app starts. Docker creates a brand-new named volume's mount point
+  # owned by root:root, but the app container runs as the distroless image's
+  # non-root uid 65532 (which has no shell to chown from inside), so without
+  # this the app can write nothing to /data — config saves fail silently
+  # (a bug in the upstream app itself, see AI.md §2.5) and every account you
+  # add vanishes on the next `docker compose up`.
+  #
+  # Runs, and re-runs, on every `docker compose up` — chown on
+  # already-correctly-owned files is a fast no-op, so this is safe and cheap
+  # to always run rather than being a manual first-time-only step.
+  init-permissions:
+    image: alpine:latest
+    container_name: gotohp-init-permissions
+    command: chown -R 65532:65532 /data
+    volumes:
+      - gotohp-data:/data
+    restart: "no"
+
   gotohp:
     build:
       context: .
@@ -8,6 +27,9 @@ services:
     image: gotohp:latest
     container_name: gotohp
     restart: unless-stopped
+    depends_on:
+      init-permissions:
+        condition: service_completed_successfully
     ports:
       # Host port picked to avoid the common 8080/3000/etc. collisions on a
       # shared VPS; override with GOTOHP_PORT=<port> docker compose up -d if
@@ -29,12 +51,6 @@ services:
       # token in the password field).
       # GOTOHP_ACCESS_TOKEN: "changeme"
     volumes:
-      # Named volume, not a bind mount: bind-mounting an empty host directory
-      # would be owned by root and unwritable by uid 65532. A named volume's
-      # mount point is created with permissions Docker/the daemon control and
-      # is generally writable by any uid; verify on first run (see below) —
-      # if the account you add doesn't survive a `docker compose restart`,
-      # the volume likely isn't writable and needs `chown 65532:65532`.
       - gotohp-data:/data
 
 volumes:
